@@ -112,9 +112,12 @@ void SPI0_IRQHandler(void)
   */
 void DMA1_CH0_IRQHandler(void)
 {
-    LHL_DMA_ClearPending(DMA_CHANNEL_0);
-    
-    LHL_DMA_Start(&hDMA1);                              // 显示启动 DMA1
+    LHL_DMA_ClearPending(DMA_CHANNEL_0);                // 清中断标志
+
+    /* 通道0 的句柄是 hDMA0(在 adc_init 中配置), 不能用 hDMA1。
+     * 这里重新 Start 是容错处理: 正常循环模式下 TCD1 的 Auto_Start 已使能,
+     * 硬件完成一个 TCD 后会自动装载下一个 TCD 并继续传输。 */
+    LHL_DMA_Start(&hDMA0);
 }
  
 /**
@@ -124,6 +127,7 @@ void DMA1_CH0_IRQHandler(void)
  */
 void DMA1_CH1_IRQHandler(void)
 {
+    /* 本工程 DMA 只使用通道0(分散聚合模式), 通道1 未配置/未使能, 此函数保留备用 */
     LHL_DMA_ClearPending(DMA_CHANNEL_1); 
 }
 

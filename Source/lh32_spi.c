@@ -52,7 +52,7 @@ void spi_init(void)
     SPI_InitStructure.DataSize = SPI_DATASIZE_8BIT;                             // 8-bit width
     SPI_InitStructure.CPOL = SPI_CPOL_LOW;                                      // DAC8562: SCLK 空闲 low
     SPI_InitStructure.CPHA = SPI_CPHA_2EDGE;                                    // DAC8562: 下降沿采样 => SPI Mode 1
-    SPI_InitStructure.BaudRatePrescaler = SPI_BAUDRATE_PSC_4;                   // SCLK = fPCLK/4
+    SPI_InitStructure.BaudRatePrescaler = SPI_BAUDRATE_PSC_4;                   // SCLK = PCLK2/4 (当前 SYSCLK=16MHz 下 = 4MHz)
     SPI_InitStructure.NSS = SPI_NSS_SOFT;                                       // NSS software control
     SPI_InitStructure.FirstBit = SPI_FIRSTBIT_MSB;                              // MSB First
     LHL_SPI_Init(pSPI0, &SPI_InitStructure);

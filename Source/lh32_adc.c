@@ -3,22 +3,22 @@
 /* Private Define ------------------------------------------------------------*/
 #define TCD_COUNT 2
 
-typedef struct {
-    uint32_t    ADC0_Data; 
-    uint32_t    ADC1_Data;  
-} ADC_DoubleData_t;                                     /* Dual ADC data */
-
 /* Global Variable -----------------------------------------------------------*/
 DMA_HandleTypeDef hDMA0, hDMA1;
+
+/* Dual ADC data buffer
+ * 注意: 必须是全局变量, 不能是 adc_init() 的局部变量。
+ * DMA 会持续向该地址写数据, 若放在栈上, 函数返回后栈空间被复用,
+ * 采样结果会丢失/破坏调用栈。 */
+ADC_DoubleData_t dADCBuffer;
 
 void adc_init(void)
 {
     REF_InitTypeDef REF_InitStructure;
     ADC_InitTypeDef ADC_InitStructure;
     DMAMUX_InitTypeDef DMAMUX_InitStructure;
-    DMA_InitTypeDef DMA_InitStructure[TCD_COUNT];       /* Multiple initialization structure parameters of the decentralized aggregation mode */
+    static DMA_InitTypeDef DMA_InitStructure[TCD_COUNT];       /* Multiple initialization structure parameters of the decentralized aggregation mode */
     static DMA_DES_N_TypeDef TCD_Quene[TCD_COUNT] __ALIGN(32); /* The DMA TCD descriptor must be 32-bit aligned.*/
-    ADC_DoubleData_t dADCBuffer;
 
     /* Initialize internal benchmark */
     REF_InitStructure.VREF = REF_INTERNAL_2P5V;                     // Internal reference voltage 2.5V
@@ -89,4 +89,32 @@ void adc_init(void)
     DMA_InitStructure[1].INT_Major = ENABLE;                            // Trigger the DMA0 main interrupt upon completion
     DMA_InitStructure[1].INT_Half = DISABLE;
     DMA_InitStructure[1].Chaining = TO_DMA_CHANNEL_NONE;
+
+    /* ---- 启动 DMA 与 ADC (原代码缺失这几步, 导致整条链路不工作) ---- */
+
+    /* 按上面的参数生成 TCD 描述符, 并把首个 TCD 装载到 DMA 通道0 硬件寄存器。
+     * 必须在配置完成后调用, 否则 TCD 只停留在软件变量里, DMA 不会工作。 */
+    LHL_DMA_Init(&hDMA0);
+
+    /* 使能 DMA 通道0 中断: TCD1 已置 INT_Major, 但 CPU 侧 NVIC 也必须打开 */
+    NVIC_ClearPendingIRQ(DMA1_CH0_IRQn);
+    NVIC_EnableIRQ(DMA1_CH0_IRQn);
+
+    /* 使能 DMA 通道0 的请求 (ADC0 触发请求源) */
+    LHL_DMA_Start(&hDMA0);
+
+    /* 启动 ADC 转换: 软件触发 + 连续转换模式, 启动后即持续采样。
+     * 不调用则 ADC 永远不转换, DMA 也就永远收不到请求。 */
+    adc_start();
+}
+
+/**
+  * @brief  启动 ADC0/ADC1 转换
+  * @param  None
+  * @retval None
+  */
+void adc_start(void)
+{
+    LHL_ADC_Start(ADC_0);
+    LHL_ADC_Start(ADC_1);
 }
