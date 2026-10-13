@@ -3,6 +3,15 @@
 /* Private Define ------------------------------------------------------------*/
 #define TCD_COUNT 2
 
+/* ⚠️ PGA 增益必须与"真正到达 AIN 引脚上的电压"匹配, 过大 -> 直接饱和!
+ * 本工程外部已做信号调理电路, 送到引脚的是"伏级"电压 -> 用 ×1。
+ * 正满量程 = 基准(2500mV) / 增益:
+ *     ×1 -> 2500mV    ×2 -> 1250mV    ×4 -> 625mV
+ *     ×32 -> 78.1mV   ×64 -> 39.1mV   ×128 -> 19.5mV
+ * 饱和特征: 超量程后码值被削平在 +满码 0x7FFFFF / 负满码 0x800000, 表现为
+ *           "输入电压变了, 读数却卡住不动"(例: 1.5V 输入 + ×64 -> 恒为 0x7FFF)。 */
+#define SENSOR_PGA   ADC_PGA_GAIN_1
+
 /* Global Variable -----------------------------------------------------------*/
 DMA_HandleTypeDef hDMA0, hDMA1;
 
@@ -20,18 +29,24 @@ void adc_init(void)
     static DMA_InitTypeDef DMA_InitStructure[TCD_COUNT];       /* Multiple initialization structure parameters of the decentralized aggregation mode */
     static DMA_DES_N_TypeDef TCD_Quene[TCD_COUNT] __ALIGN(32); /* The DMA TCD descriptor must be 32-bit aligned.*/
 
+    /* 关键提醒: 应变电桥必须有"桥压激励"(+EX/-EX, 通常 5V)才有输出!
+     *   - 若板上用外部 5V 供桥, 这里不用管;
+     *   - 若希望用芯片 VDRIVE 供桥, 取消下面这行注释(桥压 2.5V, 信号幅度减半):
+     *         LHL_ADC_SetVDRIVE(REF_INTERNAL_2P5V, ENABLE);
+     *   没有激励时, 电桥不工作 -> 引脚停在共模中点 -> 读数恒为 2.5V 不动。 */
+
     /* Initialize internal benchmark */
-    REF_InitStructure.VREF = REF_INTERNAL_2P5V;                     // Internal reference voltage 2.5V
+    REF_InitStructure.VREF = REF_INTERNAL_4P096V;                     // Internal reference voltage 2.5V
     REF_InitStructure.VREF_Boost = DISABLE;
     REF_InitStructure.VDRIVE = REF_INTERNAL_OFF;                    // Disable VDrive output
     LHL_REF_Init(&REF_InitStructure);
 
     /* Initialize ADC0 and ADC1, set synchronization, and enable DMA */
-    ADC_InitStructure.AINP = ADC0_AINP_AIN0;                        // ADC0 input channel
-    ADC_InitStructure.AINM = ADC0_AINM_AVSS;
+    ADC_InitStructure.AINP = ADC0_AINP_AIN0 ;                            // ADC0 = AIN0 = FZ (单端)
+    ADC_InitStructure.AINM = ADC0_AINM_AVSS;                            //   负端接 AVSS(0V)
     ADC_InitStructure.FS = ADC_SPS_50;                              // Output rate:50SPS
-    ADC_InitStructure.PGA = ADC_PGA_GAIN_1;                         // Internal PGA gain x1
-    ADC_InitStructure.Code = ADC_CODE_BIPOLAR;                      // Bipolar data
+    ADC_InitStructure.PGA = SENSOR_PGA;                             // 与外部调理电路输出范围匹配(见上方 SENSOR_PGA)
+    ADC_InitStructure.Code = ADC_CODE_BIPOLAR;                      // 力是双向的, 必须用双极性码(单极性会削掉负向力)
     ADC_InitStructure.Mode = ADC_MODE_CONTINUOUS_CONVERSION;        // Continuous conversion mode
     ADC_InitStructure.Trigger = ADC_TRIGGER_SOFTWARE;               // software trigger
     ADC_InitStructure.ReferenceSelect = ADC_REF_REFP_to_REFN;       // Internal benchmark
@@ -41,8 +56,8 @@ void adc_init(void)
     ADC_InitStructure.Reference = 2500.0f;
     LHL_ADC_Init(ADC_0, &ADC_InitStructure);
 
-    ADC_InitStructure.AINP = ADC1_AINP_AIN1;                        // ADC1 input channel
-    ADC_InitStructure.AINM = ADC0_AINM_AVSS;
+    ADC_InitStructure.AINP = ADC0_AINP_AIN1;                            // ADC1 = AIN1 = FX (单端)
+    ADC_InitStructure.AINM = ADC0_AINM_AVSS;                            //   负端接 AVSS(0V)
     LHL_ADC_Init(ADC_1, &ADC_InitStructure);                        // Apart from the channel, the configurations of ADC1 and ADC0 are exactly the same.
 
     LHL_ADC_SetSync(ENABLE);
@@ -54,7 +69,7 @@ void adc_init(void)
     DMAMUX_InitStructure.Request_Source = REQUEST_SOURCE_ADC0;
     DMAMUX_InitStructure.Periodic_Trigger = DISABLE;
     DMAMUX_InitStructure.Cmd = ENABLE;
-    LHL_DMAMUX_Init(&DMAMUX_InitStructure); 
+    LHL_DMAMUX_Init(&DMAMUX_InitStructure);
 
     /* Configure DMA channel 0: Transfer data from ADC0 and ADC1 */
     hDMA0.Channel = DMA_CHANNEL_0;
@@ -63,27 +78,27 @@ void adc_init(void)
     hDMA0.TCD_Count = TCD_COUNT;                                        // Two TCDs are respectively used for ADC0 and ADC1.
     hDMA0.TCD_List = TCD_Quene;                                         // TCD linked list
     hDMA0.TCD_Init = DMA_InitStructure;                                 // TCD initialization queue
-    
+
     DMA_InitStructure[0].Direction = DMA_PERIPH_TO_MEMORY;              // TCD0 is used for ADC0
     DMA_InitStructure[0].Src_Address = (uint32_t)(&pADC->ADC_DATA_0);
     DMA_InitStructure[0].Dest_Address = (uint32_t)&dADCBuffer.ADC0_Data;// Point to the cache area ADC0
-    DMA_InitStructure[0].Data_Width = DMA_DATA_WIDTH_4B;        
-    DMA_InitStructure[0].Data_Size = 1;                        
+    DMA_InitStructure[0].Data_Width = DMA_DATA_WIDTH_4B;
+    DMA_InitStructure[0].Data_Size = 1;
     DMA_InitStructure[0].Repetition = 1;
-    DMA_InitStructure[0].Trans_Mode = DMA_CYCLIC_TRANSMISSION;          
+    DMA_InitStructure[0].Trans_Mode = DMA_CYCLIC_TRANSMISSION;
     DMA_InitStructure[0].TCD_Address = (int32_t)&TCD_Quene[1];          // After completion, load TCD1
     DMA_InitStructure[0].Auto_Start = DISABLE;
     DMA_InitStructure[0].INT_Major = DISABLE;
     DMA_InitStructure[0].INT_Half = DISABLE;
-    DMA_InitStructure[0].Chaining = TO_DMA_CHANNEL_NONE;                
+    DMA_InitStructure[0].Chaining = TO_DMA_CHANNEL_NONE;
 
     DMA_InitStructure[1].Direction = DMA_PERIPH_TO_MEMORY;              // TCD1 is used for ADC1
     DMA_InitStructure[1].Src_Address = (uint32_t)(&pADC->ADC_DATA_1);
     DMA_InitStructure[1].Dest_Address = (uint32_t)&dADCBuffer.ADC1_Data;// Point to the cache area ADC1
-    DMA_InitStructure[1].Data_Width = DMA_DATA_WIDTH_4B;        
-    DMA_InitStructure[1].Data_Size = 1;                        
+    DMA_InitStructure[1].Data_Width = DMA_DATA_WIDTH_4B;
+    DMA_InitStructure[1].Data_Size = 1;
     DMA_InitStructure[1].Repetition = 1;
-    DMA_InitStructure[1].Trans_Mode = DMA_CYCLIC_TRANSMISSION;         
+    DMA_InitStructure[1].Trans_Mode = DMA_CYCLIC_TRANSMISSION;
     DMA_InitStructure[1].TCD_Address = (int32_t)&TCD_Quene[0];          // After completion, load TCD0
     DMA_InitStructure[1].Auto_Start = ENABLE;
     DMA_InitStructure[1].INT_Major = ENABLE;                            // Trigger the DMA0 main interrupt upon completion

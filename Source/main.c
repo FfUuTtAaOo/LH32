@@ -18,10 +18,22 @@
 /* Private define ------------------------------------------------------------*/ 
 uint8_t I2C_RX_Data[10], I2C_TX_Data[10];
 
+/* ADC 原始码 -> 电压换算参数(必须与 lh32_adc.c 的配置保持一致)
+ *   ADC_REF_MV: 基准电压 mV (对应 REF_INTERNAL_2P5V)
+ *   ADC_PGA_GAIN: 与 SENSOR_PGA 对应的实际倍数(×1 -> 1)
+ *   电压(mV) = 有符号24位码 × (ADC_REF_MV / ADC_PGA_GAIN) / 2^23 */
+#define ADC_REF_MV      2500.0f
+#define ADC_PGA_GAIN    1.0f
+#define ADC_FULLSCALE_MV (ADC_REF_MV / ADC_PGA_GAIN)   /* 正满量程电压, 对应码 0x7FFFFF */
+
+/* 供 Debug 的 watch 窗口直接观察的电压值(mV)。volatile 防止被优化掉。 */
+volatile float g_fz_mv, g_fx_mv;
+
 /* Functions -----------------------------------------------------------------*/
 int main(void)
 {
-    uint16_t code_a, code_b;
+    uint16_t fz_code, fx_code;
+    int32_t  fz_raw, fx_raw;
     
     /* 上电后IWDG默认开启，若无处理约20秒后复位 */
     LHL_IWDG_Stop();
@@ -43,13 +55,29 @@ int main(void)
 
     while(1)
     {
-        /* 两路 ADC 同步采样的数据都已在 dADCBuffer 中(DMA 持续更新), 分别送 DAC 双通道输出:
-         *   AIN0 -> ADC0 -> dADCBuffer.ADC0_Data -> DAC-A
-         *   AIN1 -> ADC1 -> dADCBuffer.ADC1_Data -> DAC-B
-         * 用 write_both 由 LDAC 下降沿同步更新, 保证两路输出同时生效。 */
-        code_a = (uint16_t)((dADCBuffer.ADC0_Data >> 8) & 0xFFFFu);   /* 24位右对齐双极性码取高16位 */
-        code_b = (uint16_t)((dADCBuffer.ADC1_Data >> 8) & 0xFFFFu);
-        dac8562_write_both(code_a, code_b);
+        /* 六维力传感器接线(外部已做信号调理电路, 单端输出到 ADC):
+         *   FZ -> AIN0 -> ADC0 -> dADCBuffer.ADC0_Data -> DAC-A
+         *   FX -> AIN1 -> ADC1 -> dADCBuffer.ADC1_Data -> DAC-B
+         *
+         * 两路 ADC 同步采样(同一时刻的一对样本), 用 write_both 由 LDAC 下降沿
+         * 同步更新, 保证两路输出同时生效。
+         * 若想把 FX 送到 DAC-A, 把下面两行的变量对调即可。
+         *
+         * 码制: Code = ADC_CODE_BIPOLAR 是 24 位"补码"(注意: 不是偏移二进制!):
+         *     0V -> 0x000000,  +满量程 -> 0x7FFFFF,  负电压 -> 0x800000~0xFFFFFF
+         *   (库函数 LHL_ADC_GetVoltage 用 ((int32_t)raw << 8) >> 8 做符号扩展可佐证)
+         *   正满量程 = 基准2500mV / PGA增益(见 lh32_adc.c 的 SENSOR_PGA)
+         *   一旦达到满码就是"饱和", 读数会卡住不动 -> 说明 SENSOR_PGA 太大或输入超量程。 */
+        fz_raw = ((int32_t)dADCBuffer.ADC0_Data << 8) >> 8;   /* AIN0=FZ: 24位补码 -> 符号扩展 */
+        fx_raw = ((int32_t)dADCBuffer.ADC1_Data << 8) >> 8;   /* AIN1=FX */
+
+        /* 换算为 mV, 方便在 Debug 里直接看电压是否合理 */
+        g_fz_mv = (float)fz_raw * ADC_FULLSCALE_MV / 8388608.0f;
+        g_fx_mv = (float)fx_raw * ADC_FULLSCALE_MV / 8388608.0f;
+
+        fz_code = (uint16_t)((dADCBuffer.ADC0_Data >> 8) & 0xFFFFu);   /* AIN0=FZ */
+        fx_code = (uint16_t)((dADCBuffer.ADC1_Data >> 8) & 0xFFFFu);   /* AIN1=FX */
+        dac8562_write_both(fz_code, fx_code);
 
         /* 已去掉延时: 主循环以"当前配置下可达的最高速率"刷新 DAC 双通道。
          * 当前 SYSCLK = HSI/2 = 16MHz (见 clock_init), PCLK2 同样 16MHz,
