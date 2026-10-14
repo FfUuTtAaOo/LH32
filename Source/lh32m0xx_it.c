@@ -84,15 +84,16 @@ void SysTick_Handler(void)
 }*/
 
 /**
-  * @brief  This function handles SPI0 interrupt request.
+  * @brief  This function handles SPI1 interrupt request.
   * @param  None
   * @retval None
-  * @note   DAC8562 为只写器件, SPI 改用阻塞式发送后本中断不再使能, 保留备用。
+  * @note   本工程 DAC8562 使用 SPI1(pSPI1) 的阻塞式发送, 未使能 SPI 中断,
+  *         此函数仅作保留备用(注意: 使用的是 pSPI1, 不是 pSPI0)。
   */
-void SPI0_IRQHandler(void)
+void SPI1_IRQHandler(void)
 {
     /* SPI全双工通信，进入中断说明收到数据，且上一个填充的数据已同步发送 */
-    SPI_RX_Buffer[index++] = (uint8_t)LHL_SPI_ReadData(pSPI0);                  // 收到从机发送的数据
+    SPI_RX_Buffer[index++] = (uint8_t)LHL_SPI_ReadData(pSPI1);                  // 收到从机发送的数据
     
     if (index >= MAX_SIZE)                                                      // 全部数据发送完毕，则指针复位，标志置位
     {
@@ -101,7 +102,7 @@ void SPI0_IRQHandler(void)
     }
     else
     {
-        LHL_SPI_WriteData(pSPI0, SPI_TX_Buffer[index]);                         // 还有数据，则填充下一个待发出的数据
+        LHL_SPI_WriteData(pSPI1, SPI_TX_Buffer[index]);                         // 还有数据，则填充下一个待发出的数据
     }
 }
 

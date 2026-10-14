@@ -33,6 +33,12 @@
 static uint8_t dac_tx[3];
 static uint8_t dac_rx[3];
 
+/* 最近一次 SPI 帧的返回状态 (供 Debug 的 watch 窗口观察):
+ *   0 (LHL_OK)      = 收发正常, 24 个时钟全部发完
+ *   3 (LHL_TIMEOUT) = 超时, 说明 SPI 没有真正产生时钟(典型原因: SPI 外设实例
+ *                     与引脚 AF 不匹配 / 引脚未复用)。 */
+volatile uint32_t g_dac_spi_status = 0xFFFFFFFFu;
+
 /* Private function --------------------------------------------------------*/
 
 /**
@@ -49,8 +55,9 @@ static void dac8562_write_frame(uint8_t cmd, uint8_t addr, uint16_t data)
 
     LHL_GPIO_ResetPins(DAC8562_SYNC_PORT, DAC8562_SYNC_PIN);    /* SYNC 拉低, 使能输入移位寄存器 */
 
-    /* 阻塞式发送 3 个字节, 共 24 个 SCLK 下降沿 */
-    LHL_SPI_TransmitReceive(pSPI0, dac_tx, dac_rx, 3, DAC8562_SPI_TIMEOUT);
+    /* 阻塞式发送 3 个字节, 共 24 个 SCLK 下降沿。
+     * 必须用 pSPI1: DAC8562 接在 P0.1/P0.2 上, 而 P0.x 的复用功能是 SPI1。 */
+    g_dac_spi_status = (uint32_t)LHL_SPI_TransmitReceive(pSPI1, dac_tx, dac_rx, 3, DAC8562_SPI_TIMEOUT);
 
     LHL_GPIO_SetPins(DAC8562_SYNC_PORT, DAC8562_SYNC_PIN);      /* 24 个时钟后拉高 SYNC, 结束一帧 */
 
@@ -66,23 +73,32 @@ void dac8562_init(void)
     LHL_GPIO_SetPins(DAC8562_CLR_PORT, DAC8562_CLR_PIN);
     LHL_GPIO_ResetPins(DAC8562_LDAC_PORT, DAC8562_LDAC_PIN);
 
-    /* 2. 软件复位, 清空全部寄存器 */
+    /* 2. 软件复位(DB0=1: 复位全部寄存器, 含 LDAC/上电/基准/增益寄存器) */
     dac8562_write_frame(DAC8562_CMD_RESET, 0x00u, 0x0001u);
 
-    /* 3. 使能内部 2.5V 基准 */
+    /* 3. 先把两个通道上电到"正常模式"(PD1/PD0 = 00, DB1=DB0=1 选中双通道)。
+     *    手册明确要求: 内部基准只有在"DAC 通道处于正常模式"时才可能被使能,
+     *    所以这一步必须排在使能基准之前。 */
+    dac8562_write_frame(DAC8562_CMD_POWER, 0x00u, 0x0003u);
+
+    /* 4. 使能内部 2.5V 基准 (DB0=1)。
+     *    ⚠️ 该命令会把两个通道的增益复位成 2, 因此"设置增益"必须放在它后面。 */
     dac8562_write_frame(DAC8562_CMD_INTERNAL_REF, 0x00u, 0x0001u);
 
-    /* 4. 设置双通道输出增益 (地址 010) */
+    /* 5. 设置双通道输出增益 (命令 000 + 地址 010, DB1=DAC-B, DB0=DAC-A; 0=增益2, 1=增益1)。
+     *    必须放在"使能基准"之后, 否则会被上一步复位掉。 */
 #if (DAC8562_GAIN == 1u)
     dac8562_write_frame(DAC8562_CMD_WRITE_INPUT, DAC8562_ADDR_GAIN, 0x0003u);  /* 双通道增益 = 1 */
 #else
     dac8562_write_frame(DAC8562_CMD_WRITE_INPUT, DAC8562_ADDR_GAIN, 0x0000u);  /* 双通道增益 = 2 */
 #endif
 
-    /* 5. 正常工作模式(双通道上电) */
-    dac8562_write_frame(DAC8562_CMD_POWER, 0x00u, 0x0003u);
+    /* 6. LDAC 寄存器清零(DB1=DAC-B, DB0=DAC-A; 0 = 由 LDAC 引脚控制更新)。
+     *    复位后的默认值本就是 0, 这里显式写一次, 保证 dac8562_write_both()
+     *    依赖的"LDAC 下降沿同步更新"一定有效。 */
+    dac8562_write_frame(DAC8562_CMD_LDAC_REG, 0x00u, 0x0000u);
 
-    /* 6. 双通道输出零刻度 */
+    /* 7. 双通道输出零刻度 */
     dac8562_write_frame(DAC8562_CMD_WRITE_UPD_N, DAC8562_CH_A, 0x0000u);
     dac8562_write_frame(DAC8562_CMD_WRITE_UPD_N, DAC8562_CH_B, 0x0000u);
 }
