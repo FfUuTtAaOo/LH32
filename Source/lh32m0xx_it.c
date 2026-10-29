@@ -8,6 +8,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "lh32m0xx_lhl.h"
+#include "lh32_adc.h"
 
 /* Private define ------------------------------------------------------------*/
 
@@ -119,6 +120,11 @@ void DMA1_CH0_IRQHandler(void)
      * 这里重新 Start 是容错处理: 正常循环模式下 TCD1 的 Auto_Start 已使能,
      * 硬件完成一个 TCD 后会自动装载下一个 TCD 并继续传输。 */
     LHL_DMA_Start(&hDMA0);
+
+    /* 每完成一组(ADC0+ADC1)采样 +1。
+     * 主循环据此判断"有新样本", 避免把同一组数据反复打印/反复写 DAC。
+     * 计数频率 = ADC 采样率 = 50Hz(见 adc_init 的 FS = ADC_SPS_50)。 */
+    g_adc_seq++;
 }
  
 /**

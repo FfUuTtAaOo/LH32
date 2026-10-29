@@ -6,15 +6,17 @@
  ******************************************************************************/
 #include "lh32_dac8562.h"
 
-/* 引脚定义 ----------------------------------------------------------------*/
+/* 引脚定义 ----------------------------------------------------------------
+ * ⚠️ P1.5/P1.6 已让给 UART0 (SIN0/SOUT0), 所以 LDAC/CLR 移到了 P1.1/P1.4,
+ *    必须与 gpio_init() 里配置的引脚一致。 */
 #define DAC8562_SYNC_PORT       pGPIO0
 #define DAC8562_SYNC_PIN        GPIO_PIN_3
 
 #define DAC8562_LDAC_PORT       pGPIO1
-#define DAC8562_LDAC_PIN        GPIO_PIN_5
+#define DAC8562_LDAC_PIN        GPIO_PIN_1
 
 #define DAC8562_CLR_PORT        pGPIO1
-#define DAC8562_CLR_PIN         GPIO_PIN_6
+#define DAC8562_CLR_PIN         GPIO_PIN_4
 
 /* 命令位 (DB21-DB19) ------------------------------------------------------*/
 #define DAC8562_CMD_WRITE_INPUT     0x00u   /* 写输入寄存器 n                        */

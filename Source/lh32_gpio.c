@@ -5,7 +5,7 @@ void gpio_init(void)
     GPIO_InitTypeDef GPIO_InitStructure;
     
     /* Configure pin parameters */    
-    GPIO_InitStructure.Pin = GPIO_PIN_5 | GPIO_PIN_6;       // Different pins of the same port can be configured simultaneously. Pin5 & Pin6
+    GPIO_InitStructure.Pin = GPIO_PIN_1 | GPIO_PIN_4;       // Different pins of the same port can be configured simultaneously. Pin1 & Pin4
     GPIO_InitStructure.Mode = GPIO_MODE_OUTPUT_PP;          // ??????
     GPIO_InitStructure.Current = GPIO_CURRENT_4mA;          // Drive capability: 4mA (Can be adjusted according to the load.2~16mA)
     GPIO_InitStructure.Pull = GPIO_NOPULL;                  // Top/bottom pull-up/pull-down resistor

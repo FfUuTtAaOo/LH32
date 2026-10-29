@@ -3,30 +3,6 @@
 /* Private Define ------------------------------------------------------------*/
 #define TCD_COUNT 2
 
-/* ---- AINM(负端)通道选择 ----
- * ⚠️ ADC0 与 ADC1 的通道枚举值**不一样**, 不能混用! 见 lh32m0g3x_adc.h:
- *      ADC0: AIN0..AIN11=0x00..0x0B, AVSS=0x10, REFP=0x11
- *      ADC1: AIN0..AIN11=0x00..0x0B, TEMPN=0x10, AVSS=0x11, REFP=0x12
- *    (原代码给 ADC1 写的是 ADC0_AINM_AVSS=0x10, 在 ADC1 里那是 TEMPN = 内部温度
- *     传感器负端, 并不是 AVSS —— 属于隐蔽的通道错配, 已一并修正。)
- * 接法含义与量程推导见 Include/lh32_adc.h 的 SENSOR_AINM_MODE 说明。 */
-#if (SENSOR_AINM_MODE == 1)
-  #define FZ_AINM_CH   ADC0_AINM_REFP       /* ADC0 = FZ: 负端接内部基准节点 */
-  #define FX_AINM_CH   ADC1_AINM_REFP       /* ADC1 = FX: 负端接内部基准节点 */
-#else
-  #define FZ_AINM_CH   ADC0_AINM_AVSS       /* ADC0 = FZ: 单端, 负端接 AVSS */
-  #define FX_AINM_CH   ADC1_AINM_AVSS       /* ADC1 = FX: 单端, 负端接 AVSS */
-#endif
-
-/* ⚠️ PGA 增益必须与"真正到达 AIN 引脚上的电压"匹配, 过大 -> 直接饱和!
- * 本工程外部已做信号调理电路, 送到引脚的是"伏级"电压 -> 用 ×1(见 lh32_adc.h)。
- * 正满量程 = 基准(ADC_VREF_MV, 实测约 2500mV) / 增益:
- *     ×1 -> 2500mV   ×2 -> 1250mV   ×4 -> 625mV
- *     ×32 -> 78.1mV  ×64 -> 39.1mV  ×128 -> 19.5mV
- * 饱和特征: 超量程后码值被削平在 +满码 0x7FFFFF / 负满码 0x800000, 表现为
- *           "输入电压变了, 读数却卡住不动"(例: 1.5V 输入 + ×64 -> 恒为 0x7FFF)。 */
-/* SENSOR_PGA / ADC_VREF_MV / SENSOR_AINM_MODE 统一定义在 Include/lh32_adc.h */
-
 /* Global Variable -----------------------------------------------------------*/
 DMA_HandleTypeDef hDMA0, hDMA1;
 
@@ -36,6 +12,9 @@ DMA_HandleTypeDef hDMA0, hDMA1;
  * 采样结果会丢失/破坏调用栈。 */
 ADC_DoubleData_t dADCBuffer;
 
+/* 每完成一组双通道采样 +1(在 DMA1_CH0_IRQHandler 中自增) */
+volatile uint32_t g_adc_seq;
+
 void adc_init(void)
 {
     REF_InitTypeDef REF_InitStructure;
@@ -44,30 +23,14 @@ void adc_init(void)
     static DMA_InitTypeDef DMA_InitStructure[TCD_COUNT];       /* Multiple initialization structure parameters of the decentralized aggregation mode */
     static DMA_DES_N_TypeDef TCD_Quene[TCD_COUNT] __ALIGN(32); /* The DMA TCD descriptor must be 32-bit aligned.*/
 
-    /* 关键提醒: 应变电桥必须有"桥压激励"(+EX/-EX, 通常 5V)才有输出!
-     *   - 若板上用外部 5V 供桥, 这里不用管;
-     *   - 若希望用芯片 VDRIVE 供桥, 取消下面这行注释(桥压 2.5V, 信号幅度减半):
-     *         LHL_ADC_SetVDRIVE(REF_INTERNAL_2P5V, ENABLE);
-     *   没有激励时, 电桥不工作 -> 引脚停在共模中点 -> 读数恒为 2.5V 不动。 */
-
-    /* Initialize internal benchmark
-     * 这里只能写"档位"。⚠️ 3.3V 供电时 4.096V 档给不出来(基准缓冲输出不能高于 AVDD),
-     * 实测有效基准以 ADC_VREF_MV 为准(见 lh32_adc.h, 万用表量 REFP 引脚即可标定)。 */
-    REF_InitStructure.VREF = REF_INTERNAL_4P096V;
-#if (SENSOR_AINM_MODE == 1)
-    /* 差分模式把 REFP 同时当成了 AINM 输入, 参考节点会被 ADC 采样网络加载 ->
-     * 打开参考缓冲的 BOOST 提高驱动能力, 减小基准被拉低的风险。
-     * 若发现基准反而变差(噪声/振荡), 改回 DISABLE 再试。 */
-    REF_InitStructure.VREF_Boost = ENABLE;
-#else
+    REF_InitStructure.VREF = REF_INTERNAL_2P5V;
     REF_InitStructure.VREF_Boost = DISABLE;
-#endif
     REF_InitStructure.VDRIVE = REF_INTERNAL_OFF;                    // Disable VDrive output
     LHL_REF_Init(&REF_InitStructure);
 
     /* Initialize ADC0 and ADC1, set synchronization, and enable DMA */
     ADC_InitStructure.AINP = ADC0_AINP_AIN0;                            // ADC0 = AIN0 = FZ
-    ADC_InitStructure.AINM = FZ_AINM_CH;                                //   负端: 见 SENSOR_AINM_MODE
+    ADC_InitStructure.AINM = ADC0_AINP_AIN1;
     ADC_InitStructure.FS = ADC_SPS_50;                              // Output rate:50SPS
     ADC_InitStructure.PGA = SENSOR_PGA;                             // 与外部调理电路输出范围匹配(见 lh32_adc.h)
     ADC_InitStructure.Code = ADC_CODE_BIPOLAR;                      // 力是双向的, 必须用双极性码(单极性会削掉负向力)
@@ -77,16 +40,11 @@ void adc_init(void)
     ADC_InitStructure.REF_BUFP = ENABLE;                            // Enable reference buffer
     ADC_InitStructure.REF_BUFM = ENABLE;
     ADC_InitStructure.REF_Precharge = DISABLE;
-    /* ⚠️ 这个字段是"死"的: LHL_ADC_Init() 从头到尾不读它, 而唯一使用它的
-     * LHL_ADC_GetVoltage()/GetTemperature() 在本工程中无人调用(Keil map 显示已被
-     * 链接器 Removing)。也就是说改这里的数不会碰任何硬件寄存器、也不参与本工程的
-     * 码->电压换算(那是 main.c 的事)。写成 ADC_VREF_MV 只为消除"两处基准不一致"
-     * 的误导, 别指望它能改变量程。 */
     ADC_InitStructure.Reference = ADC_VREF_MV;
     LHL_ADC_Init(ADC_0, &ADC_InitStructure);
 
-    ADC_InitStructure.AINP = ADC1_AINP_AIN1;                            // ADC1 = AIN1 = FX
-    ADC_InitStructure.AINM = FX_AINM_CH;                                //   负端: 见 SENSOR_AINM_MODE
+    ADC_InitStructure.AINP = ADC0_AINP_AIN2;                            // ADC1 = AIN1 = FX
+    ADC_InitStructure.AINM = ADC0_AINP_AIN3;
     LHL_ADC_Init(ADC_1, &ADC_InitStructure);                        // Apart from the channel, the configurations of ADC1 and ADC0 are exactly the same.
 
     LHL_ADC_SetSync(ENABLE);
