@@ -4,7 +4,7 @@
 #define TCD_COUNT 2
 
 /* Global Variable -----------------------------------------------------------*/
-DMA_HandleTypeDef hDMA0, hDMA1;
+DMA_HandleTypeDef hDMA0;
 
 /* Dual ADC data buffer
  * 注意: 必须是全局变量, 不能是 adc_init() 的局部变量。
@@ -91,11 +91,6 @@ void adc_init(void)
     DMA_InitStructure[1].INT_Major = ENABLE;                            // Trigger the DMA0 main interrupt upon completion
     DMA_InitStructure[1].INT_Half = DISABLE;
     DMA_InitStructure[1].Chaining = TO_DMA_CHANNEL_NONE;
-
-    /* ---- 启动 DMA 与 ADC (原代码缺失这几步, 导致整条链路不工作) ---- */
-
-    /* 按上面的参数生成 TCD 描述符, 并把首个 TCD 装载到 DMA 通道0 硬件寄存器。
-     * 必须在配置完成后调用, 否则 TCD 只停留在软件变量里, DMA 不会工作。 */
     LHL_DMA_Init(&hDMA0);
 
     /* 使能 DMA 通道0 中断: TCD1 已置 INT_Major, 但 CPU 侧 NVIC 也必须打开 */

@@ -36,7 +36,7 @@ void clock_init(void)
     RCC_ClockInitTypeDef clk;
 
     clk.SYSCLKSource   = RCC_SYSCLK_SRC_HSI_DIV2;   /* 0x4: 置 HSIDIV2, SW 选 HSI -> SYSCLK=HSI/2=16MHz */
-    clk.AHBCLKDivider  = RCC_SYSCLK_DIV1;           /* HCLK  = SYSCLK = 16MHz */
+    clk.AHBCLKDivider  = RCC_SYSCLK_DIV2;           /* HCLK  = SYSCLK = 16MHz */
     clk.APB1CLKDivider = RCC_HCLK_DIV1;             /* PCLK1 = HCLK   = 16MHz */
     clk.APB2CLKDivider = RCC_HCLK_DIV1;             /* PCLK2 = HCLK   = 16MHz */
 

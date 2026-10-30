@@ -47,9 +47,9 @@
 
 extern I2C_HandleTypeDef hI2C;
 extern DMA_HandleTypeDef hDMA0;
-extern DMA_HandleTypeDef hDMA1;
 extern uint8_t SPI_TX_Buffer[MAX_SIZE];
 extern uint8_t SPI_RX_Buffer[MAX_SIZE];
+extern bool bCommFlag;
 
 extern __RW uint8_t counter, flag, index;
 #endif

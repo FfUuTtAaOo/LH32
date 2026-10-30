@@ -116,9 +116,6 @@ void DMA1_CH0_IRQHandler(void)
 {
     LHL_DMA_ClearPending(DMA_CHANNEL_0);                // 清中断标志
 
-    /* 通道0 的句柄是 hDMA0(在 adc_init 中配置), 不能用 hDMA1。
-     * 这里重新 Start 是容错处理: 正常循环模式下 TCD1 的 Auto_Start 已使能,
-     * 硬件完成一个 TCD 后会自动装载下一个 TCD 并继续传输。 */
     LHL_DMA_Start(&hDMA0);
 
     /* 每完成一组(ADC0+ADC1)采样 +1。
@@ -127,15 +124,31 @@ void DMA1_CH0_IRQHandler(void)
     g_adc_seq++;
 }
  
-/**
- * @brief  This function handles DMA CHANNEL1 interrupt request.
- * @param  None
- * @retval None
- */
 void DMA1_CH1_IRQHandler(void)
 {
-    /* 本工程 DMA 只使用通道0(分散聚合模式), 通道1 未配置/未使能, 此函数保留备用 */
-    LHL_DMA_ClearPending(DMA_CHANNEL_1); 
+    LHL_DMA_ClearPending(DMA_CHANNEL_1);
+}
+
+void DMA1_CH2_3_IRQHandler(void)
+{
+    LHL_DMA_ClearPending(DMA_CHANNEL_2);
+}
+
+/**
+  * @brief  This function handles TIM6(BTIMER_1) interrupt request.
+  * @param  None
+  * @retval None
+  */
+void TIM6_IRQHandler(void)
+{
+    /* 此中断触发，意味着检测到UART空闲帧 */
+    LHL_BTIM_Stop(BTIMER_1);                                                    // 停止BTIM
+
+    LHL_BTIM_ClearPending(BTIMER_1);                                            // 清中断标志
+
+    LHL_GPIO_TogglePin(pGPIO0, GPIO_PIN_0);                                     // 翻转P0.0（LED）
+
+    bCommFlag = true;    
 }
 
 /*********************************End of File**********************************/
