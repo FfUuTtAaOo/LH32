@@ -19,6 +19,10 @@ extern ADC_DoubleData_t dADCBuffer;
  * ⚠️ 只能读, 不要在主循环里自增。 */
 extern volatile uint32_t g_adc_seq;
 
+/* adc_init() 里 LHL_DMA_Init(&hDMA0) 的返回值: 0=LHL_OK, 2=LHL_BUSY(控制器已 ACTIVE,
+ * ch0 没配上也未启动采样)。出现 2 说明有人在 adc_init() 之前先 LHL_DMA_Start 了。 */
+extern volatile uint32_t g_dma0_init_ret;
+
 /* ======================= AIN 基准 / 负端接法 (全工程唯一定义处) =======================
  *
  * 【基准电压】硬件基准由 AFE->REF_CTRL 的 REF0_MODE 决定, 只有 4.096/2.5/2.048/1.25V

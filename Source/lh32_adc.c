@@ -15,6 +15,12 @@ ADC_DoubleData_t dADCBuffer;
 /* 每完成一组双通道采样 +1(在 DMA1_CH0_IRQHandler 中自增) */
 volatile uint32_t g_adc_seq;
 
+/* LHL_DMA_Init(&hDMA0) 的返回值(供 Debug 观察):
+ *   0 = LHL_OK    -> ch0 配置成功
+ *   2 = LHL_BUSY  -> 调用时 DMA 控制器已 ACTIVE(有通道在跑), ch0 根本没配上,
+ *                    说明还有人在 adc_init() 之前就 LHL_DMA_Start 了 */
+volatile uint32_t g_dma0_init_ret;
+
 void adc_init(void)
 {
     REF_InitTypeDef REF_InitStructure;
@@ -31,7 +37,7 @@ void adc_init(void)
     /* Initialize ADC0 and ADC1, set synchronization, and enable DMA */
     ADC_InitStructure.AINP = ADC0_AINP_AIN0;                            // ADC0 = AIN0 = FZ
     ADC_InitStructure.AINM = ADC0_AINP_AIN1;
-    ADC_InitStructure.FS = ADC_SPS_50;                              // Output rate:50SPS
+    ADC_InitStructure.FS = ADC_SPS_977;                             // Output rate:50SPS
     ADC_InitStructure.PGA = SENSOR_PGA;                             // 与外部调理电路输出范围匹配(见 lh32_adc.h)
     ADC_InitStructure.Code = ADC_CODE_BIPOLAR;                      // 力是双向的, 必须用双极性码(单极性会削掉负向力)
     ADC_InitStructure.Mode = ADC_MODE_CONTINUOUS_CONVERSION;        // Continuous conversion mode
@@ -91,11 +97,20 @@ void adc_init(void)
     DMA_InitStructure[1].INT_Major = ENABLE;                            // Trigger the DMA0 main interrupt upon completion
     DMA_InitStructure[1].INT_Half = DISABLE;
     DMA_InitStructure[1].Chaining = TO_DMA_CHANNEL_NONE;
-    LHL_DMA_Init(&hDMA0);
+    g_dma0_init_ret = (uint32_t)LHL_DMA_Init(&hDMA0);
+
+    /* LHL_DMA_Init 在控制器 ACTIVE 时直接返回 LHL_BUSY(2) 且什么都不配,
+     * 此时 ch0 的 TCD 还是复位值, 再 Start 也只会空转/报配置错误,
+     * 所以失败就直接返回, 让问题暴露在 g_dma0_init_ret 上。 */
+    if (g_dma0_init_ret != (uint32_t)LHL_OK)
+    {
+        return;
+    }
 
     /* 使能 DMA 通道0 中断: TCD1 已置 INT_Major, 但 CPU 侧 NVIC 也必须打开 */
     NVIC_ClearPendingIRQ(DMA1_CH0_IRQn);
     NVIC_EnableIRQ(DMA1_CH0_IRQn);
+    NVIC_SetPriority(DMA1_CH0_IRQn, 0);                                            // 设置NVIC优先级为1
 
     /* 使能 DMA 通道0 的请求 (ADC0 触发请求源) */
     LHL_DMA_Start(&hDMA0);

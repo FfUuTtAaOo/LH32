@@ -54,8 +54,6 @@ float    vout_fz, vout_fx;
 int32_t  fz_raw, fx_raw;
 
 /* Global variable -----------------------------------------------------------*/
-bool bCommFlag;                 /* 串口空闲帧标志 */
-uint32_t lastBufferIndex, currentBufferIndex, currentCommLength;
 
 /* Functions -----------------------------------------------------------------*/
 
@@ -82,30 +80,9 @@ static float sensor_to_dac_v(float vin_v)
 
 static void uart_process(void)
 {
-    if(bCommFlag)
-    {
-        lastBufferIndex = currentBufferIndex;
-        currentBufferIndex = LHL_DMA_GetDestAddress(DMA_CHANNEL_1);
-        /* 环形缓冲区数据长度计算 */
-        if (currentBufferIndex > lastBufferIndex)
-        {
-            currentCommLength = currentBufferIndex - lastBufferIndex; 
-        }
-        else
-        {
-            currentCommLength = currentBufferIndex + MAX_COMM_SIZE - lastBufferIndex; 
-        }            
-        /* 依次打印上个通信帧数据 */        
-        for (uint32_t i=0;i<currentCommLength;i++)
-        {
-            printf("%c",*((uint8_t *)lastBufferIndex++));
-            if (lastBufferIndex >= (uint32_t)&commBuffer + MAX_COMM_SIZE)
-            {
-                lastBufferIndex = (uint32_t)&commBuffer;
-            }
-        }
-        bCommFlag = false;           
-    }    
+    if (uart_rx_count != uart_tx_count) {
+        LHL_UART_WriteData(pUART0, uart_buffer[uart_tx_count++]);             // 送出数据
+    }
 }
 
 int main(void)
@@ -128,11 +105,7 @@ int main(void)
 
     /* DAC8562 上电配置: 软件复位 + 双通道上电 + 使能内部基准 + 设置增益 */
     dac8562_init();
-    
-    lastBufferIndex = (uint32_t)&commBuffer;
-    currentBufferIndex = (uint32_t)&commBuffer;
-    bCommFlag = false;
-    
+
     printf("hello world\r\n");
 
 #if (DAC_SELFTEST)
@@ -143,8 +116,8 @@ int main(void)
         LHL_Delay_uS(100000);       /* 输出保持不动, 方便测量 */
     }
 #else
-    while(1)
-    {
+
+    while(1) {
         /* ---- 1) 24位补码 -> 有符号, 换算成传感器输入电压(mV) ---- */
         g_fz_raw = fz_raw = ((int32_t)dADCBuffer.ADC0_Data << 8) >> 8;   /* AIN0 = FZ */
         g_fx_raw = fx_raw = ((int32_t)dADCBuffer.ADC1_Data << 8) >> 8;   /* AIN1 = FX */

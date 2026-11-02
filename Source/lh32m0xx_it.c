@@ -123,32 +123,5 @@ void DMA1_CH0_IRQHandler(void)
      * 计数频率 = ADC 采样率 = 50Hz(见 adc_init 的 FS = ADC_SPS_50)。 */
     g_adc_seq++;
 }
- 
-void DMA1_CH1_IRQHandler(void)
-{
-    LHL_DMA_ClearPending(DMA_CHANNEL_1);
-}
-
-void DMA1_CH2_3_IRQHandler(void)
-{
-    LHL_DMA_ClearPending(DMA_CHANNEL_2);
-}
-
-/**
-  * @brief  This function handles TIM6(BTIMER_1) interrupt request.
-  * @param  None
-  * @retval None
-  */
-void TIM6_IRQHandler(void)
-{
-    /* 此中断触发，意味着检测到UART空闲帧 */
-    LHL_BTIM_Stop(BTIMER_1);                                                    // 停止BTIM
-
-    LHL_BTIM_ClearPending(BTIMER_1);                                            // 清中断标志
-
-    LHL_GPIO_TogglePin(pGPIO0, GPIO_PIN_0);                                     // 翻转P0.0（LED）
-
-    bCommFlag = true;    
-}
 
 /*********************************End of File**********************************/
